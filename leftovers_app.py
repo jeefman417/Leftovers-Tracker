@@ -67,40 +67,48 @@ def add_leftover(food_name, expires_days, location, added_by, notes="", photo_fi
 def get_leftovers():
     """Get all leftovers from Notion"""
     try:
-        # Simple approach - get all pages from database
-        response = notion.databases.query(database_id=DATABASE_ID)
+        # Use search instead of databases.query for current notion-client version
+        response = notion.search(
+            **{"filter": {"value": DATABASE_ID, "property": "database"}}
+        )
         
         leftovers = []
         for item in response['results']:
-            props = item['properties']
-            food = props['Food']['title'][0]['text']['content'] if props['Food']['title'] else 'Unknown'
-            expires = props['Expires']['date']['start'] if props['Expires']['date'] else None
-            days_left = props['Days Left']['number'] if props['Days Left']['number'] else 0
-            location = props['Location']['rich_text'][0]['text']['content'] if props['Location']['rich_text'] else 'Unknown'
-            added_by = props['Added By']['select']['name'] if props['Added By']['select'] else 'Unknown'
-            notes = props['Notes']['rich_text'][0]['text']['content'] if props['Notes']['rich_text'] else ''
-            
-            # Get photo URL if available
-            photo_url = None
-            if 'Photo' in props and props['Photo']['files']:
-                photo_url = props['Photo']['files'][0]['file']['url']
-            
-            if expires:
-                leftovers.append({
-                    'food': food,
-                    'expires': expires,
-                    'days_left': days_left,
-                    'location': location,
-                    'added_by': added_by,
-                    'notes': notes,
-                    'photo_url': photo_url
-                })
+            if item['object'] == 'database':
+                # Query the database pages using the correct method
+                db_pages = notion.databases.query(**{"database_id": DATABASE_ID})
+                
+                for page in db_pages['results']:
+                    props = page['properties']
+                    food = props['Food']['title'][0]['text']['content'] if props['Food']['title'] else 'Unknown'
+                    expires = props['Expires']['date']['start'] if props['Expires']['date'] else None
+                    days_left = props['Days Left']['number'] if props['Days Left']['number'] else 0
+                    location = props['Location']['rich_text'][0]['text']['content'] if props['Location']['rich_text'] else 'Unknown'
+                    added_by = props['Added By']['select']['name'] if props['Added By']['select'] else 'Unknown'
+                    notes = props['Notes']['rich_text'][0]['text']['content'] if props['Notes']['rich_text'] else ''
+                    
+                    # Get photo URL if available
+                    photo_url = None
+                    if 'Photo' in props and props['Photo']['files']:
+                        photo_url = props['Photo']['files'][0]['file']['url']
+                    
+                    if expires:
+                        leftovers.append({
+                            'food': food,
+                            'expires': expires,
+                            'days_left': days_left,
+                            'location': location,
+                            'added_by': added_by,
+                            'notes': notes,
+                            'photo_url': photo_url
+                        })
         
         return leftovers
         
     except Exception as e:
         st.error(f"Error fetching leftovers: {str(e)}")
         return []
+
 
 # Main App UI
 st.title("🍱 Leftovers Tracker")
