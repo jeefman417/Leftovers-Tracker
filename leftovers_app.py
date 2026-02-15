@@ -93,33 +93,26 @@ results = notion.databases.query(
     filter={"property": "Archived", "checkbox": {"equals": False}}
 ).get("results")
 
-# Replace your current display loop with this "Safe" version:
-
 if not results:
     st.info("The fridge is empty! Time to cook something new.")
 else:
     for page in results:
-        p = page.get("properties", {})  # Use .get to avoid None errors
+        p = page.get("properties", {})
         item_id = page["id"]
 
         # --- Safe Data Extraction ---
-        # Food Title
-        food_title = p.get("Food", {}).get("title", [])
-        food = food_title[0]["text"]["content"] if food_title else "Unknown Food"
+        food_title_list = p.get("Food", {}).get("title", [])
+        food = food_title_list[0]["text"]["content"] if food_title_list else "Unknown Food"
 
-        # Meal Cost (Handles empty numbers)
         cost_prop = p.get("Meal Cost", {}).get("number")
         cost = cost_prop if cost_prop is not None else 0.0
 
-        # Status & Days Left (Handles empty formulas)
         status = p.get("Status", {}).get("formula", {}).get("string", "No Status")
         days_left = p.get("Days Left", {}).get("formula", {}).get("string", "N/A")
 
-        # Photo (Handles empty files)
         photo_files = p.get("Photo", {}).get("files", [])
         photo = photo_files[0].get("external", {}).get("url") if photo_files else None
 
-        # Location & Added By
         loc_prop = p.get("Location", {}).get("select")
         loc = loc_prop["name"] if loc_prop else "Unknown"
         
@@ -128,7 +121,7 @@ else:
 
         # --- UI Display ---
         with st.container():
-            c1, c2, c3 = st.columns([1, 2, 1])
+            c1, c2, c3 = st.columns([1, 2, 1]) # Adjusted for better spacing
             with c1:
                 if photo: st.image(photo, width=150)
                 else: st.write("📷 No photo")
@@ -138,4 +131,18 @@ else:
                 st.write(f"**Status:** {status} ({days_left})")
                 st.write(f"💰 **Value:** ${cost:.2f}")
             with c3:
-                # Same buttons as before...
+                st.write("⚖️ **The Verdict?**")
+                # Restoring the actual buttons with correct indentation
+                if st.button("🍴 Eaten", key=f"eat_{item_id}"):
+                    notion.pages.update(page_id=item_id, properties={
+                        "The Verdict": {"select": {"name": "🍴 Eaten"}},
+                        "Archived": {"checkbox": True}
+                    })
+                    st.rerun()
+                if st.button("🗑️ Tossed", key=f"toss_{item_id}"):
+                    notion.pages.update(page_id=item_id, properties={
+                        "The Verdict": {"select": {"name": "🗑️ Tossed"}},
+                        "Archived": {"checkbox": True}
+                    })
+                    st.rerun()
+        st.divider()
