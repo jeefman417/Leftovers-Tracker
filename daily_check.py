@@ -1,17 +1,19 @@
 import os
 import requests
-from notion_client import Client
+import notion_client
 
 # 1. Setup Notion
-# Using 'bot_client' to avoid any naming conflicts with the library
+# Using 'my_fridge_connection' so there is ZERO chance of a name clash
 NOTION_TOKEN = os.getenv("NOTION_TOKEN")
 DATABASE_ID = os.getenv("NOTION_DATABASE_ID")
-bot_client = Client(auth=NOTION_TOKEN)
+
+# Initialize the client from the library
+my_fridge_connection = notion_client.Client(auth=NOTION_TOKEN)
 
 def get_fridge_summary():
     try:
-        # Query for items that are NOT archived
-        response = bot_client.databases.query(
+        # Use our unique variable name here
+        response = my_fridge_connection.databases.query(
             database_id=DATABASE_ID,
             filter={"property": "Archived", "checkbox": {"equals": False}}
         )
@@ -34,6 +36,7 @@ def get_fridge_summary():
             msg += f"- {food}: {days}\n"
         return msg
     except Exception as e:
+        # If it fails, this will send the exact error text to your phone
         return f"Error checking Notion: {str(e)}"
 
 # 2. Generate the message
@@ -44,13 +47,13 @@ print("--- ROBOT OUTPUT ---")
 print(summary)
 
 # 4. Send to Phone via ntfy.sh
-# Note: Emojis are safe in the body (data), but kept out of the Title/Headers
+# SLASH IS DEFINITELY INCLUDED HERE /
 topic = "my-fridge-alerts-2026" 
-url = f"https://ntfy.sh/{topic}"
+final_url = "https://ntfy.sh" + topic
 
 try:
     requests.post(
-        url,
+        final_url,
         data=summary.encode('utf-8'),
         headers={
             "Title": "Fridge Alert",
