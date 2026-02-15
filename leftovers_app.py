@@ -1,220 +1,132 @@
 import streamlit as st
-import notion_client
+from notion_client import Client
+import cloudinary.uploader
+import cloudinary
 from datetime import datetime, timedelta
-import os
 
-st.set_page_config(page_title="Leftovers Tracker", page_icon="🍱", layout="wide")
+# --- 1. CONFIGURATION & SECRETS ---
+st.set_page_config(page_title="Fridge Leftovers Tracker", page_icon="🧊", layout="wide")
 
-# Notion API Setup
-NOTION_TOKEN = os.getenv("NOTION_TOKEN")
-DATABASE_ID = os.getenv("DATABASE_ID", "your-database-id-here")
-
-# Initialize Notion client
 try:
-    if not NOTION_TOKEN:
-        st.error("❌ NOTION_TOKEN not set in environment variables")
-        st.stop()
-    elif not (NOTION_TOKEN.startswith("secret_") or NOTION_TOKEN.startswith("ntn_")):
-        st.error("❌ NOTION_TOKEN should start with 'secret_' or 'ntn_'")
-        st.stop()
-    else:
-        notion = notion_client.Client(auth=NOTION_TOKEN)
-        st.success("✅ Notion connected successfully!")
+    # Notion Credentials
+    notion = Client(auth=st.secrets["NOTION_TOKEN"])
+    DATABASE_ID = st.secrets["NOTION_DATABASE_ID"]
+    
+    # Cloudinary Credentials
+    cloudinary.config(
+        cloud_name=st.secrets["CLOUDINARY_CLOUD_NAME"],
+        api_key=st.secrets["CLOUDINARY_API_KEY"],
+        api_secret=st.secrets["CLOUDINARY_API_SECRET"]
+    )
 except Exception as e:
-    st.error(f"❌ Notion connection failed: {str(e)}")
+    st.error("❌ Missing Secrets! Check your Streamlit Cloud Settings.")
     st.stop()
 
-def add_leftover(food_name, expires_days, location, added_by, notes="", photo_file=None):
-    """Add new leftover to Notion database"""
+# --- 2. HELPER FUNCTIONS ---
+def add_leftover(food_name, expiry_date, location, added_by, meal_cost, notes="", photo_file=None):
+    """Sends new leftover data to Notion"""
     try:
-        expires_date = (datetime.now() + timedelta(days=expires_days)).isoformat()
-        
-        # Build properties dictionary
-        properties = {
-            "Food": {"title": [{"text": {"content": food_name}}]},
-            "Date Added": {"date": {"start": datetime.now().isoformat()}},
-            "Expires": {"date": {"start": expires_date}},
-            "Days Left": {"number": expires_days},
-            "Status": {"select": {"name": "Fresh"}},
-            "Location": {"rich_text": [{"text": {"content": location}}]},
-            "Added By": {"select": {"name": added_by}},
-            "Notes": {"rich_text": [{"text": {"content": notes}}]}
+        image_url = None
+        if photo_file:
+            upload_result = cloudinary.uploader.upload(photo_file)
+            image_url = upload_result["secure_url"]
+
+        new_page = {
+            "parent": {"database_id": DATABASE_ID},
+            "properties": {
+                "Food": {"title": [{"text": {"content": food_name}}]},
+                "Date Added": {"date": {"start": datetime.now().date().isoformat()}},
+                "Expires": {"date": {"start": expiry_date.isoformat()}},
+                "Meal Cost": {"number": meal_cost},
+                "Location": {"select": {"name": location}},
+                "Added By": {"select": {"name": added_by}},
+                "Notes": {"rich_text": [{"text": {"content": notes}}]},
+                "Archived": {"checkbox": False}
+            }
         }
-        
-        # Add photo if provided
-        if photo_file is not None:
-            try:
-                # Upload photo to Notion
-                with photo_file as file:
-                    file_content = file.read()
-                
-                # Create file in Notion
-                notion_file = notion.files.upload({
-                    "purpose": "inline",
-                    "file": file_content
-                })
-                
-                # Add photo to properties
-                properties["Photo"] = {"files": [{"name": photo_file.name, "type": "file", "file": {"url": notion_file["url"]}}]}
-            except Exception as photo_error:
-                st.warning(f"Photo upload failed: {photo_error}")
-        
-        notion.pages.create(
-            parent={"database_id": DATABASE_ID},
-            properties=properties
-        )
-        return True, "Leftover added successfully!"
+
+        if image_url:
+            new_page["properties"]["Photo"] = {
+                "files": [{"name": f"Photo_{food_name}", "type": "external", "external": {"url": image_url}}]
+            }
+
+        notion.pages.create(**new_page)
+        return True, "Added to the fridge!"
     except Exception as e:
-        return False, f"Error: {str(e)}"
+        return False, str(e)
 
-def get_leftovers():
-    """Get all leftovers from Notion"""
-    try:
-        # Use the correct method for current notion-client version
-        response = notion.databases.query(
-            **{"database_id": DATABASE_ID}
-        )
-        
-        leftovers = []
-        for item in response['results']:
-            props = item.get('properties', {})
-            
-            # Safe property access with defaults
-            food_title = props.get('Food', {}).get('title', [])
-            food = food_title[0].get('text', {}).get('content', 'Unknown') if food_title else 'Unknown'
-            
-            expires_date = props.get('Expires', {}).get('date', {})
-            expires = expires_date.get('start') if expires_date else None
-            
-            days_left = props.get('Days Left', {}).get('number', 0)
-            
-            location_text = props.get('Location', {}).get('rich_text', [])
-            location = location_text[0].get('text', {}).get('content', 'Unknown') if location_text else 'Unknown'
-            added_by_select = props.get('Added By', {}).get('select', {})
-            added_by = added_by_select.get('name', 'Unknown') if added_by_select else 'Unknown'
-            
-            notes_text = props.get('Notes', {}).get('rich_text', [])
-            notes = notes_text[0].get('text', {}).get('content', '') if notes_text else ''
-            
-            # Get photo URL if available
-            photo_url = None
-            if 'Photo' in props and props['Photo'].get('files'):
-                photo_files = props['Photo'].get('files', [])
-                if photo_files:
-                    photo_url = photo_files[0].get('file', {}).get('url')
-            
-            if expires:
-                leftovers.append({
-                    'food': food,
-                    'expires': expires,
-                    'days_left': days_left,
-                    'location': location,
-                    'added_by': added_by,
-                    'notes': notes,
-                    'photo_url': photo_url
-                })
-        
-        return leftovers
-        
-    except Exception as e:
-        st.error(f"Error fetching leftovers: {str(e)}")
-        return []
+# --- 3. UI - ADD NEW ITEM ---
+st.title("🧊 Fridge Leftover Tracker")
 
-# Main App UI
-st.title("🍱 Leftovers Tracker")
-st.write("Track your leftovers and reduce food waste!")
-
-# Add New Leftover Form
-st.header("Add New Leftover")
-with st.form("add_leftover"):
-    col1, col2 = st.columns([2, 1])
+with st.form("add_form", clear_on_submit=True):
+    col1, col2 = st.columns(2)
     
     with col1:
-        food_name = st.text_input("Food Name", placeholder="e.g., Pizza, Chicken pasta")
-        photo_file = st.file_uploader("Upload Photo (optional)", type=["jpg", "jpeg", "png", "gif"])
-    
+        food_name = st.text_input("What food is it?")
+        location = st.selectbox("Location", ["Top shelf", "Middle shelf", "Bottom shelf", "Crisper drawer", "Door"])
+        photo_file = st.camera_input("Take a photo")
+        
     with col2:
-        expires_days = st.number_input("Expires in", min_value=1, max_value=7, value=3)
-    
-    location = st.selectbox("Location", [
-        "Top shelf", "Middle shelf", "Bottom shelf", "Crisper drawer", "Door"
-    ])
-    
-    added_by = st.selectbox("Added by", ["You", "Wife"])
-    notes = st.text_area("Notes (optional)", placeholder="e.g., Half eaten, needs reheating")
-    
-    submitted = st.form_submit_button("Add Leftover")
-    
-    if submitted:
-        success, message = add_leftover(food_name, expires_days, location, added_by, notes, photo_file)
-        if success:
-            st.success(f"✅ {message}")
-            st.balloons()
+        added_by = st.selectbox("Who added it?", ["You", "Wife"])
+        # Set min_value to today to prevent "wonky" dates
+        expiry_date = st.date_input("Expiration Date", min_value=datetime.now().date(), value=datetime.now().date() + timedelta(days=3))
+        meal_cost = st.number_input("Estimated Meal Cost ($)", min_value=0.0, value=5.0, step=0.50)
+        notes = st.text_area("Notes")
+
+    if st.form_submit_button("Add to Fridge"):
+        if food_name:
+            success, msg = add_leftover(food_name, expiry_date, location, added_by, meal_cost, notes, photo_file)
+            if success: 
+                st.success(msg)
+                st.balloons()
+            else: st.error(f"Error: {msg}")
         else:
-            st.error(f"❌ {message}")
+            st.warning("Please enter a food name.")
 
-# Current Leftovers Display - ROBUST VERSION
-st.header("Current Leftovers")
-leftovers = get_leftovers()
+# --- 4. UI - FRIDGE VIEW & VERDICT ---
+st.divider()
+st.header("🔍 Current Fridge Inventory")
 
-if leftovers:
-    for item in leftovers:
-        try:
-            days_left = item.get('days_left', 0)
-            if days_left <= 1:
-                status_text = f"⚠️ Expires in {days_left} day!"
-                color = "red"
-            elif days_left <= 3:
-                status_text = f"⚠️ Expires in {days_left} days!"
-                color = "orange"
-            else:
-                status_text = f"✅ Expires in {days_left} days"
-                color = "green"
-            
-            # Display photo if available
-            if item.get('photo_url'):
-                try:
-                    st.image(item['photo_url'], width=150, caption=item.get('food', 'Unknown'))
-                except:
-                    st.write("⚠️ Could not display photo")
-            
-            # Display item info with safe defaults
-            food = item.get('food', 'Unknown')
-            location = item.get('location', 'Unknown')
-            added_by = item.get('added_by', 'Unknown')
-            expires = item.get('expires', 'Unknown')
-            notes = item.get('notes', '')
-            
-            st.markdown(f"""
-            <div style="color: {color}; font-weight: bold; padding: 10px; border-radius: 5px; margin: 10px 0;">
-            🍕 **{food}** | 📍 {location} | 👤 {added_by}  
-            {status_text} | 📅 {expires[:10] if expires else 'Unknown'} | 📝 {notes}
-            </div>
-            """, unsafe_allow_html=True)
-            
-        except Exception as display_error:
-            st.warning(f"Error displaying item: {display_error}")
-# Display a fallback version
-            st.write(f"🍕 **Item**: {item.get('food', 'Unknown')} | 📅 {item.get('expires', 'Unknown')}")
+# Query only non-archived items
+results = notion.databases.query(
+    database_id=DATABASE_ID,
+    filter={"property": "Archived", "checkbox": {"equals": False}}
+).get("results")
+
+if not results:
+    st.info("The fridge is empty! Time to cook something new.")
 else:
-    st.info("🎯 Add your first leftover above to get started!")
+    for page in results:
+        p = page["properties"]
+        item_id = page["id"]
+        food = p["Food"]["title"][0]["text"]["content"] if p["Food"]["title"] else "Unknown"
+        cost = p["Meal Cost"]["number"] or 0
+        status = p["Status"]["formula"]["string"] if "Status" in p else "Unknown"
+        days_left = p["Days Left"]["formula"]["string"] if "Days Left" in p else "N/A"
+        photo = p["Photo"]["files"][0]["external"]["url"] if p["Photo"]["files"] else None
 
-# Statistics
-st.header("📊 Waste Reduction Stats")
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    total_items = len(leftovers)
-    st.metric("Total Items", total_items)
-
-with col2:
-    expiring_count = len([item for item in leftovers if item.get('days_left', 0) <= 2])
-    st.metric("Expiring Soon", expiring_count)
-
-with col3:
-    estimated_savings = total_items * 5
-    st.metric("Est. Savings", f"${estimated_savings}")
-
-# Footer
-st.markdown("---")
-st.markdown("💡 **Tip:** Check this app daily to stay on top of your leftovers!")
+        with st.container():
+            c1, c2, c3 = st.columns([1, 2, 1])
+            with c1:
+                if photo: st.image(photo, width=150)
+            with c2:
+                st.subheader(food)
+                st.write(f"📍 {p['Location']['select']['name']} | 👤 {p['Added By']['select']['name']}")
+                st.write(f"**Status:** {status} ({days_left})")
+                st.write(f"💰 **Value:** ${cost:.2f}")
+            with c3:
+                st.write("⚖️ **The Verdict?**")
+                # Emoji-exact matches for your Notion Select property
+                if st.button("🍴 Eaten", key=f"eat_{item_id}"):
+                    notion.pages.update(page_id=item_id, properties={
+                        "The Verdict": {"select": {"name": "🍴 Eaten"}},
+                        "Archived": {"checkbox": True}
+                    })
+                    st.rerun()
+                if st.button("🗑️ Tossed", key=f"toss_{item_id}"):
+                    notion.pages.update(page_id=item_id, properties={
+                        "The Verdict": {"select": {"name": "🗑️ Tossed"}},
+                        "Archived": {"checkbox": True}
+                    })
+                    st.rerun()
+        st.divider()
