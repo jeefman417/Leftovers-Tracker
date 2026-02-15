@@ -71,11 +71,8 @@ def add_leftover(food_name, expires_days, location, added_by, notes=""):
 
 def get_leftovers():
     """Get all leftovers from Notion"""
-    if not notion_available:
-        st.warning("Notion API not available")
-        return []
-    
     try:
+        # Simple approach - get all pages from database
         response = notion.databases.query(database_id=DATABASE_ID)
         
         leftovers = []
