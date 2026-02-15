@@ -3,7 +3,6 @@ import requests
 from notion_client import Client
 
 # 1. Setup Notion
-# We use 'notion_c' as the variable name to avoid any name conflicts
 NOTION_TOKEN = os.getenv("NOTION_TOKEN")
 DATABASE_ID = os.getenv("NOTION_DATABASE_ID")
 notion_c = Client(auth=NOTION_TOKEN)
@@ -11,7 +10,6 @@ notion_c = Client(auth=NOTION_TOKEN)
 # 2. Query the Fridge
 def get_fridge_summary():
     try:
-        # We explicitly use 'database_id=' as a keyword argument
         response = notion_c.databases.query(
             database_id=DATABASE_ID,
             filter={"property": "Archived", "checkbox": {"equals": False}}
@@ -25,11 +23,12 @@ def get_fridge_summary():
         for page in results:
             p = page.get("properties", {})
             
-            # Safe Food Name extraction
-            food_title = p.get("Food", {}).get("title", [])
-            food = food_title[0]["text"]["content"] if food_title else "Unknown"
+            # --- FIX: Match these property names EXACTLY to Notion ---
+            # Food Name
+            title_list = p.get("Food", {}).get("title", [])
+            food = title_list[0]["text"]["content"] if title_list else "Unknown"
             
-            # Safe Days Left extraction
+            # Days Left
             days = p.get("Days Left", {}).get("formula", {}).get("string", "N/A")
             
             msg += f"- {food}: {days}\n"
@@ -37,7 +36,7 @@ def get_fridge_summary():
     except Exception as e:
         return f"❌ Error checking fridge: {str(e)}"
 
-# 3. Send to Phone (Using ntfy.sh)
+# 3. Send to Phone
 topic = "my-fridge-alerts-2026" 
 summary = get_fridge_summary()
 
