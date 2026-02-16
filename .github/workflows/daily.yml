@@ -2,9 +2,8 @@ name: Daily Fridge Update
 
 on:
   schedule:
-    # This runs at 08:00 UTC every day (approx. 3 AM EST / 12 AM PST)
     - cron: '0 8 * * *'
-  workflow_dispatch: # Allows you to run it manually for testing
+  workflow_dispatch:
 
 jobs:
   build:
@@ -26,5 +25,6 @@ jobs:
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+          PUSHOVER_USER_KEY: ${{ secrets.PUSHOVER_USER_KEY }}
+          PUSHOVER_API_TOKEN: ${{ secrets.PUSHOVER_API_TOKEN }}
         run: python daily_check.py
-
