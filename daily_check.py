@@ -2,54 +2,58 @@ import os
 import requests
 from notion_client import Client
 
-# 1. Setup
-token = os.getenv("NOTION_TOKEN")
-db_id = os.getenv("NOTION_DATABASE_ID")
-po_user = os.getenv("PUSHOVER_USER_KEY")
-po_token = os.getenv("PUSHOVER_API_TOKEN")
+# 1. Setup Credentials
+NOTION_TOKEN = os.getenv("NOTION_TOKEN")
+DATABASE_ID = os.getenv("NOTION_DATABASE_ID")
+PO_USER = os.getenv("PUSHOVER_USER_KEY")
+PO_TOKEN = os.getenv("PUSHOVER_API_TOKEN")
 
 # Initialize the client
-notion = Client(auth=token)
+# We use a unique variable name 'fridge_app' to avoid name clashes
+fridge_app = Client(auth=NOTION_TOKEN)
 
-# 2. Query (Using the keyword-only argument style)
-try:
-    response = notion.databases.query(
-        database_id=db_id,
-        filter={
-            "property": "Archived",
-            "checkbox": {
-                "equals": False
+def get_fridge_report():
+    try:
+        # RAW REQUEST METHOD: This bypasses the '.databases.query' shortcut 
+        # that is causing the AttributeError.
+        response = fridge_app.request(
+            path=f"databases/{DATABASE_ID}/query",
+            method="POST",
+            body={
+                "filter": {"property": "Archived", "checkbox": {"equals": False}}
             }
-        }
-    )
-    results = response.get("results", [])
+        )
+        
+        results = response.get("results", [])
 
-    if not results:
-        msg = "Fridge is empty! No leftovers to track."
-    else:
+        if not results:
+            return "Fridge is empty! No leftovers today."
+
         msg = "🍱 Fridge Update:\n"
         for page in results:
-            p = page.get("properties", {})
+            props = page.get("properties", {})
             
-            # Safe extraction for Title
-            food_title_list = p.get("Food", {}).get("title", [])
-            food = food_title_list[0].get("text", {}).get("content", "Unknown") if food_title_list else "Unknown"
+            # Safe Title extraction (Notion titles are lists)
+            title_data = props.get("Food", {}).get("title", [])
+            food = title_data[0]["text"]["content"] if title_data else "Unknown"
             
-            # Safe extraction for Formula
-            days = p.get("Days Left", {}).get("formula", {}).get("string", "N/A")
+            # Safe Formula extraction
+            days = props.get("Days Left", {}).get("formula", {}).get("string", "N/A")
             
             msg += f"- {food}: {days}\n"
+        return msg
+    except Exception as e:
+        return f"Error: {str(e)}"
 
-except Exception as e:
-    msg = f"❌ Notion Error: {str(e)}"
+# 3. Execution
+final_report = get_fridge_report()
+print(f"DEBUG REPORT: {final_report}")
 
-print(f"Final Message: {msg}")
-
-# 3. Send to Pushover
+# 4. Send via Pushover
 requests.post("https://api.pushover.net", data={
-    "token": po_token,
-    "user": po_user,
-    "message": msg,
-    "title": "Fridge Alert 🧊",
+    "token": PO_TOKEN,
+    "user": PO_USER,
+    "message": final_report,
+    "title": "Fridge Alert",
     "priority": 1
 })
