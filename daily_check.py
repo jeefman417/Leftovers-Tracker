@@ -2,46 +2,46 @@ import os
 import requests
 import notion_client
 
-# 1. Setup Notion
-# Using 'notion_bot' to avoid the DatabasesEndpoint error
+# 1. Credentials
 NOTION_TOKEN = os.getenv("NOTION_TOKEN")
 DATABASE_ID = os.getenv("NOTION_DATABASE_ID")
-notion_bot = notion_client.Client(auth=NOTION_TOKEN)
+PO_USER = os.getenv("PUSHOVER_USER_KEY")
+PO_TOKEN = os.getenv("PUSHOVER_API_TOKEN")
 
-def get_fridge_summary():
+# 2. Establish Connection (Unique variable name to avoid library clash)
+fridge_conn = notion_client.Client(auth=NOTION_TOKEN)
+
+def get_fridge_report():
     try:
-        response = notion_bot.databases.query(
+        response = fridge_conn.databases.query(
             database_id=DATABASE_ID,
             filter={"property": "Archived", "checkbox": {"equals": False}}
         )
         results = response.get("results", [])
-        
+
         if not results:
-            return "Fridge is empty! No leftovers to track."
-        
-        msg = "Morning Fridge Update:\n"
+            return "Fridge is empty! No leftovers today."
+
+        msg = "🍱 Fridge Update:\n"
         for page in results:
-            p = page.get("properties", {})
-            # Extract Food Name
-            title_list = p.get("Food", {}).get("title", [])
-            food = title_list[0].get("text", {}).get("content", "Unknown") if title_list else "Unknown"
-            # Extract Days Left
-            days = p.get("Days Left", {}).get("formula", {}).get("string", "N/A")
+            props = page.get("properties", {})
+            title_list = props.get("Food", {}).get("title", [])
+            food = title_list[0]["text"]["content"] if title_list else "Unknown"
+            days = props.get("Days Left", {}).get("formula", {}).get("string", "N/A")
             msg += f"- {food}: {days}\n"
         return msg
     except Exception as e:
-        return f"Notion Error: {str(e)}"
+        return f"Error: {str(e)}"
 
-# 2. Get Data
-summary = get_fridge_summary()
-print(f"Robot output: {summary}")
+# 3. Execution
+report = get_fridge_report()
+print(f"REPORT: {report}")
 
-# 3. Send to Phone (HARD-CODED URL WITH SLASH)
-requests.post(
-    "https://ntfy.sh",
-    data=summary.encode('utf-8'),
-    headers={
-        "Title": "Fridge Alert",
-        "Priority": "high"
-    }
-)
+# 4. Send via Pushover (No complex URL math required)
+requests.post("https://api.pushover.net", data={
+    "token": PO_TOKEN,
+    "user": PO_USER,
+    "message": report,
+    "title": "Fridge Alert 🧊",
+    "priority": 1 # High priority
+})
